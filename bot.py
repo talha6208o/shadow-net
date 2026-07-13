@@ -1,13 +1,11 @@
 import telebot
 import sqlite3
-import time
 import os
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv('BOT_TOKEN', '8629212279:AAF7rgLbU7SLYG64Mli2hupmGZENxbmNg24')
 ADMIN_ID = 6641244885
 bot = telebot.TeleBot(TOKEN)
-admin_states = {}
 
 # DATABASE FUNCTIONS
 def db_query(query, params=(), fetch=False, fetchall=False):
@@ -18,7 +16,9 @@ def db_query(query, params=(), fetch=False, fetchall=False):
         if fetch: result = c.fetchone()
         elif fetchall: result = c.fetchall()
         else: conn.commit(); result = True
-    except: result = None
+    except Exception as e: 
+        print(f"DB Error: {e}")
+        result = None
     finally: conn.close()
     return result
 
@@ -28,6 +28,7 @@ def handle_clicks(call):
     user_id = call.from_user.id
     data = call.data
 
+    # Giveaway View Feature
     if data == "admin_view_giveaway":
         if user_id != ADMIN_ID: return
         participants = db_query("SELECT user_id FROM giveaway_participants", fetchall=True)
@@ -39,15 +40,22 @@ def handle_clicks(call):
             text += f"👤 `ID: {p[0]}`\n"
         bot.send_message(user_id, text, parse_mode="Markdown")
 
-    elif data.startswith("admin_"):
+    # Admin Reset Feature
+    elif data == "admin_reset_giveaway":
         if user_id != ADMIN_ID: return
-        action = data.replace("admin_", "")
-        
-        if action == "reset_giveaway":
-            db_query("DELETE FROM giveaway_participants")
-            bot.answer_callback_query(call.id, "✅ List Reset!")
+        db_query("DELETE FROM giveaway_participants")
+        bot.answer_callback_query(call.id, "✅ List Reset!")
 
-    # Yahan apne baki purane elif conditions add kar lena...
+    # Purane features yahan wapas daal lo
+    elif data == "join_giveaway":
+        db_query("INSERT OR IGNORE INTO giveaway_participants (user_id) VALUES (?)", (user_id,))
+        bot.answer_callback_query(call.id, "🎉 Joined Giveaway!")
+    
+    # ... (yahan apne baki redeem wale elif daal dena) ...
+
+@bot.message_handler(commands=['start'])
+def start_bot(message):
+    bot.reply_to(message, "✅ Bot is working! Use buttons to proceed.")
 
 print("🔥 BOT IS RUNNING!")
 bot.infinity_polling()
