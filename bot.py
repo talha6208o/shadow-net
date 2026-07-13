@@ -1,70 +1,379 @@
-# [Zaroori Imports aur Settings pehle jaisi hi rahengi]
+import telebot
+import sqlite3
+import time
+import os
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+# ================= SECURE SETTINGS =================
+TOKEN = os.getenv('BOT_TOKEN', '8629212279:AAF7rgLbU7SLYG64Mli2hupmGZENxbmNg24')  
+ADMIN_ID = 6641244885          
+BOT_USERNAME = 'ShadowNetflix_bot' 
+
+# CHANNEL & GROUP DETAILS
+CHANNEL_USERNAME = '@Shadow_cipher0'
+CHANNEL_URL = 'https://t.me/Shadow_cipher0'
+GROUP_USERNAME = '@Shadow_cipher00'
+GROUP_URL = 'https://t.me/Shadow_cipher00'
+
+# BOT INITIALIZATION (Ye sabse upar hona chahiye, handlers se pehle!)
+bot = telebot.TeleBot(TOKEN)
+admin_states = {}
 
 # ================= DATABASE SETUP =================
 def init_db():
     conn = sqlite3.connect('hybrid_bot.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, first_name TEXT, pending_referrer INTEGER)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referred_user_id INTEGER UNIQUE)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS stock (id INTEGER PRIMARY KEY AUTOINCREMENT, item_type TEXT, item_value TEXT, is_used INTEGER DEFAULT 0)''')
-    # Naya Table
-    c.execute('''CREATE TABLE IF NOT EXISTS giveaway_participants (user_id INTEGER PRIMARY KEY)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (user_id INTEGER PRIMARY KEY, first_name TEXT, pending_referrer INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS referrals 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER, referred_user_id INTEGER UNIQUE)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS stock 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, item_type TEXT, item_value TEXT, is_used INTEGER DEFAULT 0)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS giveaway_participants 
+                 (user_id INTEGER PRIMARY KEY)''')
     conn.commit()
     conn.close()
 
-# ================= GIVEAWAY LOGIC =================
-@bot.callback_query_handler(func=lambda call: call.data == "join_giveaway")
-def join_giveaway(call):
-    user_id = call.from_user.id
-    if not is_subscribed(user_id):
-        return bot.answer_callback_query(call.id, "⚠️ Join channel/group first!", show_alert=True)
-    
-    try:
-        db_query("INSERT INTO giveaway_participants (user_id) VALUES (?)", (user_id,))
-        bot.answer_callback_query(call.id, "🎉 Successfully joined the giveaway!", show_alert=True)
-    except:
-        bot.answer_callback_query(call.id, "✅ You are already in the giveaway!", show_alert=True)
+init_db()
 
-# ================= ADMIN DASHBOARD (UPDATED) =================
+def db_query(query, params=(), fetch=False, fetchall=False):
+    conn = sqlite3.connect('hybrid_bot.db')
+    c = conn.cursor()
+    try:
+        c.execute(query, params)
+        if fetch: result = c.fetchone()
+        elif fetchall: result = c.fetchall()
+        else:
+            conn.commit()
+            result = True
+    except Exception as e:
+        print(f"DB Error: {e}")
+        result = None
+    finally:
+        conn.close()
+    return result
+
+# ================= SUBSCRIPTION CHECKER =================
+def is_subscribed(user_id):
+    if user_id == ADMIN_ID:
+        return True
+    try:
+        for _ in range(2):
+            m1 = bot.get_chat_member(CHANNEL_USERNAME, user_id)
+            m2 = bot.get_chat_member(GROUP_USERNAME, user_id)
+            valid = ['member', 'administrator', 'creator']
+            if m1.status in valid and m2.status in valid:
+                return True
+            time.sleep(0.5)
+        return False
+    except Exception as e: 
+        print(f"Telegram API Connection Alert: {e}")
+        return False
+
+# ================= ANTI-BYPASS REFERRED POINTS =================
+def get_user_points(user_id):
+    referred_users = db_query("SELECT referred_user_id FROM referrals WHERE referrer_id=?", (user_id,), fetchall=True)
+    if not referred_users: 
+        return 0
+    valid_ref_count = 0
+    for ref in referred_users:
+        if is_subscribed(ref[0]):
+            valid_ref_count += 1
+    return valid_ref_count * 5
+
+# ================= MAIN MENU =================
+@bot.message_handler(commands=['start'])
+def start_menu(message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    
+    parts = message.text.split()
+    referrer_id = None
+    if len(parts) > 1:
+        try:
+            referrer_id = int(parts[1])
+            if referrer_id == user_id: referrer_id = None
+        except: pass
+
+    user = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetch=True)
+    if not user:
+        db_query("INSERT INTO users (user_id, first_name, pending_referrer) VALUES (?, ?, ?)", (user_id, first_name, referrer_id))
+    else:
+        if not is_subscribed(user_id) and referrer_id:
+            db_query("UPDATE users SET pending_referrer=? WHERE user_id=?", (referrer_id, user_id))
+
+    if not is_subscribed(user_id):
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📢 Join Official Channel", url=CHANNEL_URL))
+        markup.add(InlineKeyboardButton("💬 Join Official Group", url=GROUP_URL))
+        markup.add(InlineKeyboardButton("✅ I Have Joined Both", callback_data="check_sub"))
+        
+        text = (
+            f"👋 Hello {first_name}!\n\n"
+            "🛑 **ACCESS DENIED**\n\n"
+            "To use this bot and claim premium rewards, you must join **both** our Official Channel and Group.\n\n"
+            "👇 Click the buttons below to join, then click 'I Have Joined Both' to verify."
+        )
+        bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=markup)
+        return
+
+    show_main_dashboard(user_id, first_name)
+
+def show_main_dashboard(user_id, first_name):
+    points = get_user_points(user_id)
+    ref_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🎬 Netflix (25 Points)", callback_data="redeem_netflix"))
+    markup.add(InlineKeyboardButton("🍿 Prime Video (25 Points)", callback_data="redeem_prime"))
+    markup.add(InlineKeyboardButton("🎵 Spotify Premium (25 Points)", callback_data="redeem_spotify"))
+    markup.add(InlineKeyboardButton("🎁 Join Giveaway", callback_data="join_giveaway"))
+    markup.add(InlineKeyboardButton("🔄 Refresh Points", callback_data="refresh_dash"))
+    
+    text = (
+        f"👋 **Welcome, {first_name}!**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 **Your Balance:** `{points}` Points\n"
+        f"👥 **Referral Value:** 5 Points per friend\n"
+        "🎯 **Redeem Target:** 25 Points per account\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔗 **Your Referral Link:**\n`{ref_link}`\n\n"
+        "⚠️ *Note: If your friends leave the channel or group, your points will be automatically deducted! (Anti-Cheat Active)*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 **Select an item to redeem:**"
+    )
+    bot.send_message(user_id, text, parse_mode="Markdown", reply_markup=markup)
+
+# ================= ADMIN CONTROL PANEL =================
+@bot.message_handler(commands=['admin'])
+def send_admin_panel(message):
+    if message.from_user.id != ADMIN_ID: return
+    show_admin_panel(message.chat.id)
+
 def show_admin_panel(chat_id):
-    # ... (purane stats)
+    net_stock = db_query("SELECT COUNT(*) FROM stock WHERE item_type='netflix' AND is_used=0", fetch=True)[0]
+    prime_stock = db_query("SELECT COUNT(*) FROM stock WHERE item_type='prime' AND is_used=0", fetch=True)[0]
+    spot_stock = db_query("SELECT COUNT(*) FROM stock WHERE item_type='spotify' AND is_used=0", fetch=True)[0]
+    total_users = db_query("SELECT COUNT(*) FROM users", fetch=True)[0]
+    
     markup = InlineKeyboardMarkup(row_width=2)
-    # Giveaway wale buttons
+    markup.add(
+        InlineKeyboardButton("➕ Add Netflix", callback_data="admin_add_netflix"),
+        InlineKeyboardButton("🗑 Clear Netflix", callback_data="admin_clear_netflix"),
+        InlineKeyboardButton("➕ Add Prime", callback_data="admin_add_prime"),
+        InlineKeyboardButton("🗑 Clear Prime", callback_data="admin_clear_prime"),
+        InlineKeyboardButton("➕ Add Spotify", callback_data="admin_add_spotify"),
+        InlineKeyboardButton("🗑 Clear Spotify", callback_data="admin_clear_spotify")
+    )
     markup.add(
         InlineKeyboardButton("🎁 Reset Giveaway", callback_data="admin_reset_giveaway"),
         InlineKeyboardButton("📢 Giveaway Broadcast", callback_data="admin_giveaway_broadcast")
     )
-    # ... (baki buttons)
-    bot.send_message(chat_id, "👑 Admin Panel", reply_markup=markup)
+    markup.add(InlineKeyboardButton("📢 Custom Broadcast Message", callback_data="admin_broadcast"))
+    markup.add(InlineKeyboardButton("🏆 Leaderboard Stats", callback_data="admin_stats"))
+    
+    text = (
+        "👑 **ADMIN CONTROL DASHBOARD** 👑\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 **Total Joined Users:** `{total_users}` Users\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎬 **Netflix Stock:** `{net_stock}` Accounts\n"
+        f"🍿 **Prime Video Stock:** `{prime_stock}` Accounts\n"
+        f"🎵 **Spotify Stock:** `{spot_stock}` Codes/Links\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 **Niche diye gaye buttons se direct manage karein:**"
+    )
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
-# ================= CALLBACK HANDLERS =================
+# ================= CALLBACK & ACTION HANDLERS =================
 @bot.callback_query_handler(func=lambda call: True)
 def handle_clicks(call):
-    # ... (purane handlers)
+    user_id = call.from_user.id
+    first_name = call.from_user.first_name
     
-    if call.data == "admin_reset_giveaway":
-        db_query("DELETE FROM giveaway_participants")
-        bot.answer_callback_query(call.id, "✅ Giveaway list reset! Fresh start.", show_alert=True)
-    
-    elif call.data == "admin_giveaway_broadcast":
-        admin_states[call.from_user.id] = "giveaway_broadcast"
-        bot.send_message(call.message.chat.id, "📢 Send the content for Giveaway Broadcast:")
-        bot.register_next_step_handler(call.message, process_giveaway_broadcast)
+    if call.data == "check_sub":
+        if is_subscribed(user_id):
+            try: bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            
+            user_data = db_query("SELECT pending_referrer FROM users WHERE user_id=?", (user_id,), fetch=True)
+            if user_data and user_data[0]:
+                referrer_id = user_data[0]
+                try:
+                    db_query("INSERT INTO referrals (referrer_id, referred_user_id) VALUES (?, ?)", (referrer_id, user_id))
+                    bot.send_message(referrer_id, "🎉 **New Refer Point Added!**\nSomeone joined genuinely using your link (+5 Points).", parse_mode="Markdown")
+                except: pass
+                db_query("UPDATE users SET pending_referrer = NULL WHERE user_id=?", (user_id,))
+            show_main_dashboard(user_id, first_name)
+        else: 
+            bot.answer_callback_query(call.id, "⚠️ You must join BOTH the channel and the group first!", show_alert=True)
 
-# ================= GIVEAWAY BROADCAST =================
+    elif call.data == "refresh_dash":
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        show_main_dashboard(user_id, first_name)
+
+    elif call.data == "join_giveaway":
+        if not is_subscribed(user_id):
+            return bot.answer_callback_query(call.id, "⚠️ Join channel and group first!", show_alert=True)
+        try:
+            db_query("INSERT INTO giveaway_participants (user_id) VALUES (?)", (user_id,))
+            bot.answer_callback_query(call.id, "🎉 Successfully joined the giveaway!", show_alert=True)
+        except:
+            bot.answer_callback_query(call.id, "✅ You are already in the giveaway!", show_alert=True)
+
+    elif call.data.startswith("redeem_"):
+        if not is_subscribed(user_id):
+            bot.answer_callback_query(call.id, "⚠️ Access Denied! You left the group/channel.", show_alert=True)
+            return
+            
+        item_type = call.data.replace("redeem_", "")
+        points = get_user_points(user_id)
+        
+        if points < 25:
+            bot.answer_callback_query(call.id, f"⚠️ You need 25 points to redeem! (Current: {points})", show_alert=True)
+            return
+            
+        stock_data = db_query("SELECT id, item_value FROM stock WHERE item_type=? AND is_used=0 LIMIT 1", (item_type,), fetch=True)
+        if stock_data:
+            item_id, item_val = stock_data
+            db_query("UPDATE stock SET is_used=1 WHERE id=?", (item_id,))
+            
+            referred_users = db_query("SELECT referred_user_id FROM referrals WHERE referrer_id=? LIMIT 5", (user_id,), fetchall=True)
+            for ref in referred_users:
+                db_query("DELETE FROM referrals WHERE referred_user_id=?", (ref[0],))
+                
+            bot.send_message(user_id, f"🎉 **REDEEM SUCCESSFUL!** 🎉\n\n🎁 **Your {item_type.capitalize()} Reward:**\n`{item_val}`\n\nThank you for inviting real members! ❤️", parse_mode="Markdown")
+            bot.answer_callback_query(call.id, "Reward Claimed!", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, f"⚠️ {item_type.capitalize()} is currently out of stock! Admin will restock soon.", show_alert=True)
+
+    elif call.data.startswith("admin_"):
+        if user_id != ADMIN_ID: return
+        action = call.data.replace("admin_", "")
+        
+        if action.startswith("add_"):
+            item_type = action.replace("add_", "")
+            admin_states[user_id] = f"upload_{item_type}"
+            msg = bot.send_message(user_id, f"📥 **Send Stock Data:**\nFormat for {item_type.capitalize()}:\nSend text data (e.g. `email:pass` or `code`). Type `/cancel` to abort.")
+            bot.register_next_step_handler(msg, process_stock_upload)
+            
+        elif action.startswith("clear_"):
+            item_type = action.replace("clear_", "")
+            db_query("DELETE FROM stock WHERE item_type=? AND is_used=0", (item_type,))
+            bot.answer_callback_query(call.id, f"🗑️ Unused {item_type.capitalize()} stock cleared!", show_alert=True)
+            try: bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            show_admin_panel(user_id)
+            
+        elif action == "reset_giveaway":
+            db_query("DELETE FROM giveaway_participants")
+            bot.answer_callback_query(call.id, "✅ Giveaway list reset! Fresh start.", show_alert=True)
+            try: bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            show_admin_panel(user_id)
+            
+        elif action == "giveaway_broadcast":
+            admin_states[user_id] = "giveaway_broadcasting"
+            msg = bot.send_message(user_id, "📢 **GIVEAWAY BROADCAST MODE**\nSend content for giveaway participants. Type `/cancel` to abort.")
+            bot.register_next_step_handler(msg, process_giveaway_broadcast)
+            
+        elif action == "broadcast":
+            admin_states[user_id] = "broadcasting"
+            msg = bot.send_message(user_id, "📢 **BROADCAST MODE**\nSend any text, photo, video or message you want to blast to all users. Type `/cancel` to abort.")
+            bot.register_next_step_handler(msg, process_broadcast)
+            
+        elif action == "stats":
+            users_list = db_query("SELECT user_id, first_name FROM users", fetchall=True)
+            leaderboard = []
+            for u in users_list:
+                pts = get_user_points(u[0])
+                if pts > 0: leaderboard.append((u[1], pts))
+            leaderboard.sort(key=lambda x: x[1], reverse=True)
+            leaderboard = leaderboard[:10]
+            
+            text = "🏆 **TOP 10 LEADERBOARD** 🏆\n━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            if leaderboard:
+                for i, (name, pts) in enumerate(leaderboard, 1): 
+                    text += f"{i}. {name} — **{pts} Points** ({int(pts/5)} Invites)\n"
+            else: text += "No points recorded yet."
+            bot.send_message(user_id, text, parse_mode="Markdown")
+
+# ================= ADMIN INPUT STEPS =================
+def process_stock_upload(message):
+    user_id = message.from_user.id
+    if message.text == '/cancel':
+        if user_id in admin_states: del admin_states[user_id]
+        return bot.reply_to(message, "❌ Upload cancelled.")
+        
+    if user_id not in admin_states or not admin_states[user_id].startswith("upload_"):
+        return
+        
+    item_type = admin_states[user_id].replace("upload_", "")
+    item_val = message.text.strip() if message.text else ""
+    
+    if not item_val:
+        return bot.reply_to(message, "⚠️ Invalid input.")
+        
+    if db_query("INSERT INTO stock (item_type, item_value) VALUES (?, ?)", (item_type, item_val)):
+        bot.reply_to(message, f"✅ Successfully uploaded to **{item_type.capitalize()}** stock!")
+    else:
+        bot.reply_to(message, "❌ Database error.")
+        
+    if user_id in admin_states: del admin_states[user_id]
+    show_admin_panel(user_id)
+
 def process_giveaway_broadcast(message):
+    user_id = message.from_user.id
+    if message.text == '/cancel':
+        if user_id in admin_states: del admin_states[user_id]
+        return bot.reply_to(message, "❌ Broadcast cancelled.")
+        
     participants = db_query("SELECT user_id FROM giveaway_participants", fetchall=True)
-    if not participants:
+    if not participants: 
+        if user_id in admin_states: del admin_states[user_id]
         return bot.reply_to(message, "⚠️ Giveaway list khali hai!")
         
-    bot.reply_to(message, f"⏳ Broadcasting to {len(participants)} participants...")
-    
+    bot.reply_to(message, f"⏳ Broadcasting to {len(participants)} giveaway participants...")
     success, fail = 0, 0
+    
     for user in participants:
         try:
-            bot.copy_message(user[0], message.chat.id, message.message_id)
+            bot.copy_message(chat_id=user[0], from_chat_id=message.chat.id, message_id=message.message_id)
             success += 1
             time.sleep(0.05)
-        except: fail += 1
+        except Exception: 
+            fail += 1
             
-    bot.send_message(message.chat.id, f"✅ Done!\nSent: {success}\nFailed: {fail}")
+    bot.send_message(ADMIN_ID, f"✅ **GIVEAWAY BROADCAST COMPLETE!**\nDelivered: `{success}`\nFailed/Blocked: `{fail}`")
+    if user_id in admin_states: del admin_states[user_id]
+    show_admin_panel(user_id)
+
+def process_broadcast(message):
+    user_id = message.from_user.id
+    if message.text == '/cancel':
+        if user_id in admin_states: del admin_states[user_id]
+        return bot.reply_to(message, "❌ Broadcast cancelled.")
+        
+    users = db_query("SELECT user_id FROM users", fetchall=True)
+    if not users: 
+        if user_id in admin_states: del admin_states[user_id]
+        return bot.reply_to(message, "⚠️ No users found in database.")
+        
+    bot.reply_to(message, f"⏳ Broadcasting to {len(users)} users. Please wait...")
+    success, fail = 0, 0
+    
+    for user in users:
+        try:
+            bot.copy_message(chat_id=user[0], from_chat_id=message.chat.id, message_id=message.message_id)
+            success += 1
+            time.sleep(0.05)
+        except Exception: 
+            fail += 1
+            
+    bot.send_message(ADMIN_ID, f"✅ **BROADCAST COMPLETE!**\nDelivered: `{success}`\nFailed/Blocked: `{fail}`")
+    if user_id in admin_states: del admin_states[user_id]
+    show_admin_panel(user_id)
+
+print("🔥 SHADOW FREE REWARDS BOT IS RUNNING ON RAILWAY! 🔥")
+bot.infinity_polling(timeout=20, long_polling_timeout=20)
