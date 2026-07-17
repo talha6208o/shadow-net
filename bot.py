@@ -250,11 +250,11 @@ def show_main_dashboard(user_id, first_name):
 
     markup = InlineKeyboardMarkup()
 
-    markup.add(InlineKeyboardButton("🎬 Netflix (25 Points)", callback_data="redeem_netflix"))
+    markup.add(InlineKeyboardButton("🎬 Netflix (30 Points)", callback_data="redeem_netflix"))
 
-    markup.add(InlineKeyboardButton("🍿 Prime Video (25 Points)", callback_data="redeem_prime"))
+    markup.add(InlineKeyboardButton("🍿 Prime Video (30 Points)", callback_data="redeem_prime"))
 
-    markup.add(InlineKeyboardButton("🎵 Spotify Premium (25 Points)", callback_data="redeem_spotify"))
+    markup.add(InlineKeyboardButton("🎵 Spotify Premium (20 Points)", callback_data="redeem_spotify"))
 
     markup.add(InlineKeyboardButton("🎁 Join Giveaway", callback_data="join_giveaway"))
 
@@ -272,7 +272,7 @@ def show_main_dashboard(user_id, first_name):
 
         f"👥 **Referral Value:** 5 Points per friend\n"
 
-        "🎯 **Redeem Target:** 25 Points per account\n"
+        "🎯 **Redeem Target:** 30 Points per account\n"
 
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
