@@ -272,7 +272,7 @@ def show_main_dashboard(user_id, first_name):
 
         f"👥 **Referral Value:** 5 Points per friend\n"
 
-        "🎯 **Redeem Target:** 25 Points per account\n"
+        "🎯 **Redeem Target:** 30 Points per account\n"
 
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
 
