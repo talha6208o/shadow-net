@@ -462,7 +462,7 @@ def handle_clicks(call):
 
         
 
-        if points < 25:
+        if points < 30:
 
             bot.answer_callback_query(call.id, f"⚠️ You need 25 points to redeem! (Current: {points})", show_alert=True)
 
